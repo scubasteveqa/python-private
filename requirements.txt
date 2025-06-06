@@ -1,0 +1,3 @@
+shiny
+numpy
+git+https://github.com/scubasteveqa/private-package.git
