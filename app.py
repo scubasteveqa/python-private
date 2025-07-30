@@ -1,119 +1,102 @@
-from shiny import App, reactive, render, ui
+from shiny import App, render, ui, reactive
+import pandas as pd
 import matplotlib.pyplot as plt
+from my_custom_package import DataProcessor, generate_sample_data, format_number
 
-# Import from our custom package
-# In a real scenario, this would be installed from GitHub
-from pythonprivatepackage import calculate_fibonacci, generate_data_summary, DataProcessor
+# Generate sample data using our custom package
+sample_data = generate_sample_data(200)
 
-# Initialize our data processor
-processor = DataProcessor()
-
-app_ui = ui.page_sidebar(
-    ui.sidebar(
-        ui.input_numeric("fib_n", "Fibonacci number (n):", value=10, min=1, max=50),
-        ui.input_text("numbers", "Enter numbers (comma-separated):", value="1,2,3,4,5"),
-        ui.input_action_button("process", "Process Data", class_="btn-primary"),
-        ui.hr(),
-        ui.h4("Package Demo"),
-        ui.p("This app demonstrates using a custom GitHub package with functions for:")
-    ),
-    
-    ui.card(
-        ui.card_header("Fibonacci Calculator"),
-        ui.output_text("fibonacci_result")
-    ),
-    
-    ui.card(
-        ui.card_header("Data Summary"),
-        ui.output_text("data_summary")
-    ),
-    
-    ui.card(
-        ui.card_header("Processed Data Visualization"),
-        ui.output_plot("processed_plot")
-    ),
-    
-    ui.card(
-        ui.card_header("Processing Statistics"),
-        ui.output_text("process_stats")
+app_ui = ui.page_fluid(
+    ui.h1("Shiny App with Custom Package"),
+    ui.layout_sidebar(
+        ui.panel_sidebar(
+            ui.input_slider("n_rows", "Number of rows:", min=10, max=200, value=100),
+            ui.input_selectize("category", "Filter by category:", 
+                             choices=["All"] + list(sample_data["category"].unique()),
+                             selected="All"),
+            ui.input_numeric("min_value", "Minimum value:", value=None),
+            ui.input_numeric("max_value", "Maximum value:", value=None),
+            ui.hr(),
+            ui.h4("Data Statistics"),
+            ui.output_text_verbatim("stats")
+        ),
+        ui.panel_main(
+            ui.h3("Filtered Data"),
+            ui.output_data_frame("data_table"),
+            ui.h3("Value Distribution"),
+            ui.output_plot("value_plot")
+        )
     )
 )
 
 def server(input, output, session):
-    # Reactive value to store processed data
-    processed_data = reactive.value([])
+    @reactive.Calc
+    def filtered_data():
+        # Use our custom DataProcessor
+        processor = DataProcessor()
+        
+        # Start with sample data limited by slider
+        data_subset = sample_data.head(input.n_rows())
+        processor.load_data(data_subset)
+        
+        # Apply category filter
+        if input.category() != "All":
+            processor.data = processor.data[processor.data["category"] == input.category()]
+        
+        # Apply value filters using our custom method
+        processor.filter_data("value", input.min_value(), input.max_value())
+        
+        return processor
     
+    @output
+    @render.data_frame
+    def data_table():
+        data = filtered_data().data
+        # Format the value column using our custom function
+        data_display = data.copy()
+        data_display["value"] = data_display["value"].apply(lambda x: format_number(x, 2))
+        return data_display
+    
+    @output
     @render.text
-    def fibonacci_result():
-        n = input.fib_n()
-        if n is None:
-            return "Please enter a valid number"
+    def stats():
+        stats = filtered_data().calculate_stats()
+        if not stats:
+            return "No data available"
         
-        fib_value = calculate_fibonacci(int(n))
-        return f"The {n}th Fibonacci number is: {fib_value}"
-    
-    @render.text
-    def data_summary():
-        numbers_str = input.numbers()
-        if not numbers_str.strip():
-            return "Please enter some numbers"
+        output_lines = [f"Total records: {stats['count']}"]
         
-        try:
-            numbers = [float(x.strip()) for x in numbers_str.split(',') if x.strip()]
-            summary = generate_data_summary(numbers)
-            
-            return f"""
-            Data Summary:
-            • Count: {summary['count']}
-            • Sum: {summary['sum']:.2f}
-            • Mean: {summary['mean']:.2f}
-            • Min: {summary['min']:.2f}
-            • Max: {summary['max']:.2f}
-            """
-        except ValueError:
-            return "Error: Please enter valid numbers separated by commas"
-    
-    @reactive.effect
-    @reactive.event(input.process)
-    def _():
-        numbers_str = input.numbers()
-        if not numbers_str.strip():
-            return
+        if "value" in stats["mean"]:
+            output_lines.extend([
+                f"Value mean: {format_number(stats['mean']['value'])}",
+                f"Value median: {format_number(stats['median']['value'])}",
+                f"Value std: {format_number(stats['std']['value'])}"
+            ])
         
-        try:
-            numbers = [float(x.strip()) for x in numbers_str.split(',') if x.strip()]
-            # Use our custom package's DataProcessor class
-            squared_numbers = processor.process_numbers(numbers)
-            processed_data.set(squared_numbers)
-        except ValueError:
-            processed_data.set([])
+        if "score" in stats["mean"]:
+            output_lines.extend([
+                f"Score mean: {format_number(stats['mean']['score'])}",
+                f"Score median: {format_number(stats['median']['score'])}"
+            ])
+        
+        return "\n".join(output_lines)
     
+    @output
     @render.plot
-    def processed_plot():
-        data = processed_data()
-        if not data:
-            fig, ax = plt.subplots(figsize=(8, 6))
-            ax.text(0.5, 0.5, 'Click "Process Data" to see visualization', 
-                   ha='center', va='center', transform=ax.transAxes, fontsize=14)
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, 1)
-            ax.set_xticks([])
-            ax.set_yticks([])
+    def value_plot():
+        data = filtered_data().data
+        if data.empty:
+            fig, ax = plt.subplots()
+            ax.text(0.5, 0.5, "No data to display", ha="center", va="center")
             return fig
         
         fig, ax = plt.subplots(figsize=(10, 6))
-        x_values = range(1, len(data) + 1)
-        ax.bar(x_values, data, color='skyblue', alpha=0.7)
-        ax.set_xlabel('Data Point Index')
-        ax.set_ylabel('Squared Value')
-        ax.set_title('Processed Data (Squared Values)')
+        ax.hist(data["value"], bins=20, alpha=0.7, edgecolor="black")
+        ax.set_xlabel("Value")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Distribution of Values")
         ax.grid(True, alpha=0.3)
         
         return fig
-    
-    @render.text
-    def process_stats():
-        count = processor.get_process_count()
-        return f"Total processing operations: {count}"
 
 app = App(app_ui, server)
