@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 # Import from our custom package
 # In a real scenario, this would be installed from GitHub
-from python_private_package import calculate_fibonacci, generate_data_summary, DataProcessor
+from pythonprivatepackage import calculate_fibonacci, generate_data_summary, DataProcessor
 
 # Initialize our data processor
 processor = DataProcessor()
